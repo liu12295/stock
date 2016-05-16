@@ -29,12 +29,7 @@ import random
 
 import matplotlib.pyplot as plt
 from matplotlib.finance import quotes_historical_yahoo_ochl
-from matplotlib.dates import YearLocator, MonthLocator, DayLocator, \
-    HourLocator, MinuteLocator, SecondLocator, DateFormatter
-
-from time import gmtime, strftime
-from tzlocal import get_localzone
-import pytz
+from matplotlib.dates import HourLocator, MinuteLocator, SecondLocator, DateFormatter
 
 ctrl = {}
 
@@ -65,10 +60,11 @@ class Stock(object):
     def __str__(self):
         return self.symbol
         
-    def __init__(self, symbol, interval_seconds):
+    def __init__(self, symbol, interval_seconds, num_days):
         self.symbol = symbol
         self.quotes = []
         self.interval_seconds = interval_seconds
+        self.num_days = num_days
 
     def get_first_dt(self):
         return self.quotes[0].dt
@@ -88,6 +84,18 @@ class Stock(object):
     def __repr__(self):
         return self.to_csv()
 
+    #
+    # Given a sequence of quotes, retun a list of
+    # scores depending on need...
+    #
+    def compute_scores(self, quotes):
+        if ctrl['ChartType'] == "close":
+            return [q.c for q in quotes]
+        elif ctrl['ChartType'] == "volatile":
+            open_price = quotes[0].o
+            return [(100.0 * (q.c-open_price) / open_price) for q in quotes]
+        return [q.c for q in quotes]
+    
     def write2csv(self):
         fname = self.symbol + ".csv"
         print "Create", fname
@@ -132,7 +140,7 @@ class Stock(object):
 
             # fake the year/month/day, since the chart only cares about hr/min/sec
             dates  = [q.get_uniform_dt() for q in quotes]
-            scores = [q.o for q in quotes]
+            scores = self.compute_scores(quotes)
             last_quote = quotes[-1]
 
             ax.plot_date(dates, scores, \
@@ -159,9 +167,9 @@ class Stock(object):
         
         plt.legend(loc='best', shadow=True)
         plt.tick_params(axis='y', which='both', labelleft='on', labelright='on')
-        plt.ylabel('Price')
+        plt.ylabel(ctrl['ChartType'])
         plt.xlabel('Interval ' + str(self.interval_seconds / 60.0) + ' min')
-        plt.title(self.symbol + " in last " + str(num_days) + " days")
+        plt.title(self.symbol + " in last " + str(self.num_days) + " days")
         
         plt.show()
         return
@@ -170,9 +178,9 @@ class Stock(object):
 # Collect intraday quote for a symbol.
 #
 def CollectIntradayQuote(symbol, interval_seconds, num_days):
-    stock = Stock(symbol, interval_seconds)
-    url = ctrl["URL"] + symbol
-    url += "&i={0}&p={1}d&f=d,o,h,l,c,v".format(interval_seconds,num_days)
+    stock = Stock(symbol, interval_seconds, num_days)
+    url = ctrl['URL']
+    url += "q={0}&i={1}&p={2}d&f=d,o,h,l,c,v".format(symbol,interval_seconds,num_days)
     csv = requests.get(url).text.encode('utf-8').split('\n')
 
     _, timezone_offset = csv[6].split('=')
@@ -196,7 +204,7 @@ def CollectIntradayQuote(symbol, interval_seconds, num_days):
 
         # Create a new quote
         quote = Quote(dt, float(fields[4]), float(fields[2]), float(fields[3]), \
-                       float(fields[1]), int(fields[5]))
+                      float(fields[1]), int(fields[5]))
 
         # Append this new quote to current stock
         stock.append(quote)
@@ -214,7 +222,7 @@ try:
 except IOError as e:
     sys.exit( "I/O error({0}): {1}".format(e.errno, e.strerror) + ": stock.json")
 
-print datetime.datetime.now()
+print "Now", datetime.datetime.now()
 
 for symbol in ctrl["Symbols"]:
     stock = CollectIntradayQuote(symbol["symbol"], ctrl["Interval"], ctrl["Days"])
