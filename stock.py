@@ -117,14 +117,14 @@ class Stock(object):
         fig, ax = plt.subplots(figsize=(20, 10))
 
         day = self.get_first_dt()
-        num_days = float((self.get_last_dt() - day).days)
+        num_days = 1 + (self.get_last_dt() - day).days
 
         #
         # Walk thru the quotes, and group them by day
         #
         while day <= self.get_last_dt():
             quotes = [q for q in self.quotes if q.get_day() == day.day]
-            mfc = ((self.get_last_dt() - day).days / num_days)
+            mfc = 1.0 - (float(1+(day - self.get_first_dt()).days) / float(num_days))
             day += datetime.timedelta(days=1)
             
             if not quotes:
@@ -171,10 +171,8 @@ class Stock(object):
 #
 def CollectIntradayQuote(symbol, interval_seconds, num_days):
     stock = Stock(symbol, interval_seconds)
-
-    url = "http://www.google.com/finance/getprices?q={0}".format(symbol)
+    url = ctrl["URL"] + symbol
     url += "&i={0}&p={1}d&f=d,o,h,l,c,v".format(interval_seconds,num_days)
-    print "Visit", url
     csv = requests.get(url).text.encode('utf-8').split('\n')
 
     _, timezone_offset = csv[6].split('=')

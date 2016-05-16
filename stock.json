@@ -1,13 +1,11 @@
 {
+    "URL" : "http://www.google.com/finance/getprices?q=",
     "UTC" : -8,
-    "Interval" : 60,
+    "Interval" : 300,
     "Days" : 5,
     "Symbols": [
         {
-            "symbol" : "AAPL"
-        },
-        {
-            "symbol" : "INTC"
+            "symbol" : "GOOG"
         }
     ]
 }
