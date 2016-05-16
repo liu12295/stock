@@ -1,2 +1,2 @@
-# stock
-Study stock intraday behavior
+Usage: python stock.py
+
