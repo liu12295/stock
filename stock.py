@@ -65,9 +65,10 @@ class Stock(object):
     def __str__(self):
         return self.symbol
         
-    def __init__(self, symbol):
+    def __init__(self, symbol, interval_seconds):
         self.symbol = symbol
         self.quotes = []
+        self.interval_seconds = interval_seconds
 
     def get_first_dt(self):
         return self.quotes[0].dt
@@ -106,10 +107,6 @@ class Stock(object):
             return
 
         markers = ['o', 'v', '^', 's', 'p', '*', 'h', 'H', 'D', 'd']
-        mfc = ['#1f77b4', '#aec7e8', '#ff7f0e', '#ffbb78', '#2ca02c',
-               '#98df8a', '#d62728', '#ff9896', '#9467bd', '#c5b0d5',
-               '#8c564b', '#c49c94', '#e377c2', '#f7b6d2', '#7f7f7f',
-               '#c7c7c7', '#bcbd22', '#dbdb8d', '#17becf', '#9edae5']    
         ls = ['dashed', 'dashdot', 'dotted']
     
         hours   = HourLocator()    # every hour
@@ -120,12 +117,14 @@ class Stock(object):
         fig, ax = plt.subplots(figsize=(20, 10))
 
         day = self.get_first_dt()
+        num_days = float((self.get_last_dt() - day).days)
 
         #
         # Walk thru the quotes, and group them by day
         #
         while day <= self.get_last_dt():
             quotes = [q for q in self.quotes if q.get_day() == day.day]
+            mfc = ((self.get_last_dt() - day).days / num_days)
             day += datetime.timedelta(days=1)
             
             if not quotes:
@@ -138,7 +137,7 @@ class Stock(object):
 
             ax.plot_date(dates, scores, \
                          ls=random.choice(ls), marker=random.choice(markers), \
-                         markerfacecolor=random.choice(mfc), \
+                         markerfacecolor=str(mfc), \
                          label=str(last_quote.dt.month)+'/'+str(last_quote.dt.day))
 
             ax.text(last_quote.dt, last_quote.c, str(last_quote.c), fontsize=12, color='g')
@@ -160,9 +159,9 @@ class Stock(object):
         
         plt.legend(loc='best', shadow=True)
         plt.tick_params(axis='y', which='both', labelleft='on', labelright='on')
-        plt.ylabel('$.$$')
-        plt.xlabel('Local Hour')
-        plt.title(self.symbol)
+        plt.ylabel('Price')
+        plt.xlabel('Interval ' + str(self.interval_seconds / 60.0) + ' min')
+        plt.title(self.symbol + " in last " + str(num_days) + " days")
         
         plt.show()
         return
@@ -171,7 +170,7 @@ class Stock(object):
 # Collect intraday quote for a symbol.
 #
 def CollectIntradayQuote(symbol, interval_seconds, num_days):
-    stock = Stock(symbol)
+    stock = Stock(symbol, interval_seconds)
 
     url = "http://www.google.com/finance/getprices?q={0}".format(symbol)
     url += "&i={0}&p={1}d&f=d,o,h,l,c,v".format(interval_seconds,num_days)
