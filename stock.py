@@ -26,6 +26,7 @@ import time, datetime, os
 import csv, json, re, sys
 import requests
 import random
+import numpy as np
 
 import matplotlib.pyplot as plt
 from matplotlib.finance import quotes_historical_yahoo_ochl
@@ -49,6 +50,12 @@ class Quote(object):
     def get_day(self):
         return self.dt.day
 
+    def get_median(self):
+        return np.median(np.array([self.o,self.h,self.l,self.c]))
+
+    def get_ratio(self,ref):
+        return  ((self.get_median() - ref) / ref)
+
     def get_uniform_dt(self):
         return datetime.datetime(1971, 1, 1, \
                                  self.dt.hour,self.dt.minute, second=self.dt.second) 
@@ -60,11 +67,12 @@ class Stock(object):
     def __str__(self):
         return self.symbol
         
-    def __init__(self, symbol, interval_seconds, num_days):
+    def __init__(self, symbol, interval_seconds):
         self.symbol = symbol
-        self.quotes = []
+        # The page_num, or key, of self.book is the yr_mo_day, and the
+        # contents of each page are a list of quotes on that day.
+        self.book = {}
         self.interval_seconds = interval_seconds
-        self.num_days = num_days
 
     def get_first_dt(self):
         return self.quotes[0].dt
@@ -72,9 +80,19 @@ class Stock(object):
     def get_last_dt(self):
         return self.quotes[-1].dt
 
+    # Given a quote, return the page_num, or key, where this qutoe should
+    # belong to.
+    def get_page_num_str(self, quote):
+        return str(quote.dt.year) + '_' + str(quote.dt.month) + '_' + str(quote.dt.day)
+
+    # Append a new quote according to its day.
     def append(self, quote):
-        self.quotes.append(quote)
-        return len(self.quotes)
+        # page_num is the key of self.book
+        page_num = self.get_page_num_str(quote)
+        if not self.book.has_key(page_num):
+            self.book[page_num] = []
+        self.book[page_num].append(quote)
+        return
 
     def dump(self):
         print self.symbol, len(self.quotes)
@@ -86,32 +104,52 @@ class Stock(object):
 
     #
     # Given a sequence of quotes, retun a list of
-    # scores depending on need...
+    # scores depending on ChartType.
     #
     def compute_scores(self, quotes):
+        # Use close price as score
         if ctrl['ChartType'] == "close":
             return [q.c for q in quotes]
-        elif ctrl['ChartType'] == "volatile":
-            open_price = quotes[0].o
-            return [(100.0 * (q.c-open_price) / open_price) for q in quotes]
+
+        # Use median price
+        if ctrl['ChartType'] == "median":
+            return [q.get_median() for q in quotes]
+        
+        # K-nearest neighbors
+        if ctrl['ChartType'] == "knn":
+            return [q.get_ratio(quotes[0].o) for q in quotes]
+
+        # Default will use close price as score
         return [q.c for q in quotes]
+
+    def get_first_page(self):
+        return self.book.itervalues().next()
+
+    def get_last_page(self):
+        page_num = self.book.keys()[-1];
+        return self.book[page_num]
     
     def write2csv(self):
+        if not self.book:
+            return
+        
         fname = self.symbol + ".csv"
         print "Create", fname
 
         with open(fname, 'wb') as f:
-            keys = self.quotes[0].__dict__.keys()
+            first_page = self.get_first_page();
+            keys = first_page[0].__dict__.keys()
             w = csv.DictWriter(f, fieldnames=keys)
             w.writeheader()
-            for quote in self.quotes:
-                w.writerow(quote.__dict__)
+            for page_num, quotes in self.book.iteritems():
+                for quote in quotes:
+                    w.writerow(quote.__dict__)
         return
 
     # Plot the history for current symbol
     def plot(self):
-        if len(self.quotes) < 2:
-            print "Nothing to plot"
+        if not self.book:
+            print "Not enough data to plot"
             return
 
         markers = ['o', 'v', '^', 's', 'p', '*', 'h', 'H', 'D', 'd']
@@ -124,20 +162,15 @@ class Stock(object):
 
         fig, ax = plt.subplots(figsize=(20, 10))
 
-        day = self.get_first_dt()
-        num_days = 1 + (self.get_last_dt() - day).days
+        num_days = len(self.book)
+        delta = 1.0 / float(num_days);
+        mfc = 1.0;
 
         #
         # Walk thru the quotes, and group them by day
         #
-        while day <= self.get_last_dt():
-            quotes = [q for q in self.quotes if q.get_day() == day.day]
-            mfc = 1.0 - (float(1+(day - self.get_first_dt()).days) / float(num_days))
-            day += datetime.timedelta(days=1)
-            
-            if not quotes:
-                continue
-
+        for page_num, quotes in self.book.iteritems():
+            assert(quotes)
             # fake the year/month/day, since the chart only cares about hr/min/sec
             dates  = [q.get_uniform_dt() for q in quotes]
             scores = self.compute_scores(quotes)
@@ -149,6 +182,9 @@ class Stock(object):
                          label=str(last_quote.dt.month)+'/'+str(last_quote.dt.day))
 
             ax.text(last_quote.dt, last_quote.c, str(last_quote.c), fontsize=12, color='g')
+
+            mfc -= delta
+
 
         # format the ticks
         ax.xaxis.set_major_locator(hours)
@@ -169,7 +205,7 @@ class Stock(object):
         plt.tick_params(axis='y', which='both', labelleft='on', labelright='on')
         plt.ylabel(ctrl['ChartType'])
         plt.xlabel('Interval ' + str(self.interval_seconds / 60.0) + ' min')
-        plt.title(self.symbol + " in last " + str(self.num_days) + " days")
+        plt.title(self.symbol + " in last " + str(num_days) + " days")
         
         plt.show()
         return
@@ -178,7 +214,7 @@ class Stock(object):
 # Collect intraday quote for a symbol.
 #
 def CollectIntradayQuote(symbol, interval_seconds, num_days):
-    stock = Stock(symbol, interval_seconds, num_days)
+    stock = Stock(symbol, interval_seconds)
     url = ctrl['URL']
     url += "q={0}&i={1}&p={2}d&f=d,o,h,l,c,v".format(symbol,interval_seconds,num_days)
     csv = requests.get(url).text.encode('utf-8').split('\n')

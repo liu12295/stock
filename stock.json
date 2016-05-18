@@ -1,9 +1,9 @@
 {
     "URL" : "http://www.google.com/finance/getprices?",
     "UTC" : -8,
-    "Interval" : 120,
+    "Interval" : 300,
     "Days" : 5,
-    "ChartType" : "volatile",
+    "ChartType" : "median",
     "Symbols": [
         {
             "symbol" : "INTC"
