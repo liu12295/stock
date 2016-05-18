@@ -23,6 +23,7 @@
 #
 
 import time, datetime, os
+from collections import OrderedDict
 import csv, json, re, sys
 import requests
 import random
@@ -53,10 +54,11 @@ class Quote(object):
     def get_median(self):
         return np.median(np.array([self.o,self.h,self.l,self.c]))
 
+    # Return the median price of this quote wrt ref price.
     def get_ratio(self,ref):
         return  ((self.get_median() - ref) / ref)
 
-    def get_uniform_dt(self):
+    def get_normalized_dt(self):
         return datetime.datetime(1971, 1, 1, \
                                  self.dt.hour,self.dt.minute, second=self.dt.second) 
 
@@ -70,15 +72,10 @@ class Stock(object):
     def __init__(self, symbol, interval_seconds):
         self.symbol = symbol
         # The page_num, or key, of self.book is the yr_mo_day, and the
-        # contents of each page are a list of quotes on that day.
-        self.book = {}
+        # content of each page is a list of quotes on that day.
+        self.book = OrderedDict()
         self.interval_seconds = interval_seconds
-
-    def get_first_dt(self):
-        return self.quotes[0].dt
-
-    def get_last_dt(self):
-        return self.quotes[-1].dt
+        self.knn_candidate_set = set()
 
     # Given a quote, return the page_num, or key, where this qutoe should
     # belong to.
@@ -103,21 +100,62 @@ class Stock(object):
         return self.to_csv()
 
     #
+    # Compute KNN candidates that meet today's criteria.
+    #
+    def prepare_knn_candidate_set(self):
+        if len(self.book) < 2:
+            return 0
+
+        open_price = self.get_today_open_price();
+        prev_close_price = self.get_yesterday_close_price();
+        ref_ratio = (open_price - prev_close_price) / prev_close_price
+        print "KNN ratio: ", prev_close_price, open_price, ref_ratio
+        sys.stdout.flush()
+        prev_close_price = 1
+        
+        for page_num, quotes in self.book.iteritems():
+            open_price = quotes[0].o
+            ratio = (open_price - prev_close_price) / prev_close_price
+
+            if (abs(ref_ratio) <= 0.04) and (abs(ratio) <= 0.04):
+                # in [-0.04, 0.04] range
+                self.knn_candidate_set.add(quotes[0].dt);
+            elif (ref_ratio > 0.04) and (ratio > 0.04):
+                # in [0.04, +] range
+                self.knn_candidate_set.add(quotes[0].dt);
+            elif (ref_ratio < 0.04) and (ratio < 0.04):
+                # in [-, -0.04] range
+                self.knn_candidate_set.add(quotes[0].dt);
+
+            prev_close_price = quotes[-1].c
+            
+        return len(self.knn_candidate_set)
+    
+    #
+    # Should we consider these quotes a valid candidate for KNN
+    #
+    def is_knn_candidate(self, quotes):
+        return quotes[0].dt in self.knn_candidate_set;
+    
+    #
     # Given a sequence of quotes, retun a list of
     # scores depending on ChartType.
     #
     def compute_scores(self, quotes):
         # Use close price as score
-        if ctrl['ChartType'] == "close":
+        if ctrl['ChartType'].lower() == "close":
             return [q.c for q in quotes]
 
         # Use median price
-        if ctrl['ChartType'] == "median":
+        if ctrl['ChartType'].lower() == "median":
             return [q.get_median() for q in quotes]
         
         # K-nearest neighbors
-        if ctrl['ChartType'] == "knn":
-            return [q.get_ratio(quotes[0].o) for q in quotes]
+        if ctrl['ChartType'].lower() == "knn":
+            if self.is_knn_candidate(quotes):
+                return [q.get_ratio(quotes[0].o) for q in quotes]
+            else:
+                return []
 
         # Default will use close price as score
         return [q.c for q in quotes]
@@ -125,10 +163,23 @@ class Stock(object):
     def get_first_page(self):
         return self.book.itervalues().next()
 
-    def get_last_page(self):
+    def get_latest_quote(self):
         page_num = self.book.keys()[-1];
-        return self.book[page_num]
+        return self.book[page_num][-1]
     
+    def get_today_open_price(self):
+        assert(len(self.book) >= 1)
+        page_num = self.book.keys()[-1];        
+        return self.book[page_num][0].o
+
+    def get_yesterday_close_price(self):
+        assert(len(self.book) >= 2)
+        page_num = self.book.keys()[-2];        
+        return self.book[page_num][-1].c
+
+    def is_last_page(self, page_num):
+        return page_num == self.book.keys()[-1];
+
     def write2csv(self):
         if not self.book:
             return
@@ -141,7 +192,12 @@ class Stock(object):
             keys = first_page[0].__dict__.keys()
             w = csv.DictWriter(f, fieldnames=keys)
             w.writeheader()
+
+            last_quote_dt = datetime.datetime.fromtimestamp(0);
             for page_num, quotes in self.book.iteritems():
+                # Make sure quotes are listed in order
+                assert(last_quote_dt < quotes[0].dt)
+                last_quote_dt = quotes[0].dt
                 for quote in quotes:
                     w.writerow(quote.__dict__)
         return
@@ -151,6 +207,12 @@ class Stock(object):
         if not self.book:
             print "Not enough data to plot"
             return
+
+        # Prepare data for KNN
+        if ctrl['ChartType'].lower() == "knn":
+            if self.prepare_knn_candidate_set() < 2:
+                print "No candidate for KNN plot"
+                return
 
         markers = ['o', 'v', '^', 's', 'p', '*', 'h', 'H', 'D', 'd']
         ls = ['dashed', 'dashdot', 'dotted']
@@ -163,28 +225,44 @@ class Stock(object):
         fig, ax = plt.subplots(figsize=(20, 10))
 
         num_days = len(self.book)
-        delta = 1.0 / float(num_days);
-        mfc = 1.0;
+        gradient = 1.0;
 
         #
-        # Walk thru the quotes, and group them by day
+        # Walk thru each day
         #
+        last_quote_dt = datetime.datetime.fromtimestamp(0);
+
         for page_num, quotes in self.book.iteritems():
-            assert(quotes)
-            # fake the year/month/day, since the chart only cares about hr/min/sec
-            dates  = [q.get_uniform_dt() for q in quotes]
             scores = self.compute_scores(quotes)
-            last_quote = quotes[-1]
+
+            if not scores:
+                continue;
+
+            # Make sure quotes are listed in order
+            if last_quote_dt:
+                assert(last_quote_dt < quotes[0].dt)
+                last_quote_dt = quotes[0].dt
+            
+            # Normalize the year/month/day, since the chart only cares about hr/min/sec
+            dates  = [q.get_normalized_dt() for q in quotes]
+            last_quote = quotes[0]
+
+            # Quotes from last page worths more attention.
+            if self.is_last_page(page_num):
+                mfc = "red"
+                marker = 'D'
+            else:
+                mfc = str(gradient)
+                marker = random.choice(markers)
 
             ax.plot_date(dates, scores, \
-                         ls=random.choice(ls), marker=random.choice(markers), \
-                         markerfacecolor=str(mfc), \
+                         ls=random.choice(ls), marker=marker, \
+                         markerfacecolor=mfc, \
                          label=str(last_quote.dt.month)+'/'+str(last_quote.dt.day))
 
             ax.text(last_quote.dt, last_quote.c, str(last_quote.c), fontsize=12, color='g')
 
-            mfc -= delta
-
+            gradient -= (1.0 / float(num_days - 1));
 
         # format the ticks
         ax.xaxis.set_major_locator(hours)
@@ -205,7 +283,9 @@ class Stock(object):
         plt.tick_params(axis='y', which='both', labelleft='on', labelright='on')
         plt.ylabel(ctrl['ChartType'])
         plt.xlabel('Interval ' + str(self.interval_seconds / 60.0) + ' min')
-        plt.title(self.symbol + " in last " + str(num_days) + " days")
+
+        q = self.get_latest_quote();
+        plt.title(self.symbol + " in last " + str(num_days) + " days" + " @" + str(q.c))
         
         plt.show()
         return
