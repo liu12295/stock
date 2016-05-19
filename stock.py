@@ -69,13 +69,51 @@ class Stock(object):
     def __str__(self):
         return self.symbol
         
-    def __init__(self, symbol, interval_seconds):
+    def __init__(self, symbol, interval_seconds, buys, sells):
         self.symbol = symbol
         # The page_num, or key, of self.book is the yr_mo_day, and the
         # content of each page is a list of quotes on that day.
         self.book = OrderedDict()
         self.interval_seconds = interval_seconds
         self.knn_candidate_set = set()
+
+        # Create buys and sells records, and convert them
+        # from string to datetime type
+        self.buys = []
+        self.sells = []
+        
+        for buy in buys:
+            self.buys.append(datetime.datetime.strptime(buy, "%Y-%m-%d %H:%M:%S"))
+
+        for sell in sells:
+            self.sells.append(datetime.datetime.strptime(sell, "%Y-%m-%d %H:%M:%S"))
+
+        self.buys.sort()
+        self.sells.sort()
+            
+        return
+
+    # Given a list of quotes, return a sub-list of it that have buy events
+    def get_buy_quotes(self, quotes):
+        assert(quotes)
+        results = []
+
+        for buy in self.buys:
+            if (buy > quotes[-1].dt) or (buy < quotes[0].dt):
+                continue
+
+            last_quote = quotes[0]
+            for quote in quotes:
+                if quote.dt == buy:
+                    results.append(quote)
+                    break;
+                elif quote.dt > buy:
+                    results.append(last_quote)
+                    break;
+                else:
+                    last_quote = quote
+
+        return results;
 
     # Given a quote, return the page_num, or key, where this qutoe should
     # belong to.
@@ -238,13 +276,16 @@ class Stock(object):
             if not scores:
                 continue;
 
+            # Keep the mapping for later highlighting use
+            if self.buys or self.sells:
+                quotes_2_scores = dict(zip(quotes, scores))
+
             # Make sure quotes are listed in order
-            if last_quote_dt:
-                assert(last_quote_dt < quotes[0].dt)
-                last_quote_dt = quotes[0].dt
+            assert(last_quote_dt < quotes[0].dt)
+            last_quote_dt = quotes[0].dt
             
             # Normalize the year/month/day, since the chart only cares about hr/min/sec
-            dates  = [q.get_normalized_dt() for q in quotes]
+            norm_dates  = [q.get_normalized_dt() for q in quotes]
             last_quote = quotes[0]
 
             # Quotes from last page worths more attention.
@@ -255,14 +296,24 @@ class Stock(object):
                 mfc = str(gradient)
                 marker = random.choice(markers)
 
-            ax.plot_date(dates, scores, \
+            ax.plot_date(norm_dates, scores, \
                          ls=random.choice(ls), marker=marker, \
-                         markerfacecolor=mfc, \
+                         markersize=5.0, markerfacecolor=mfc, \
                          label=str(last_quote.dt.month)+'/'+str(last_quote.dt.day))
 
             ax.text(last_quote.dt, last_quote.c, str(last_quote.c), fontsize=12, color='g')
-
             gradient -= (1.0 / float(num_days - 1));
+
+            # Highlight the buys
+            if self.buys:
+                buy_quotes = self.get_buy_quotes(quotes)
+                if buy_quotes:
+                    norm_dates  = [q.get_normalized_dt() for q in buy_quotes]
+                    scores = [score for quote, score in quotes_2_scores.iteritems() \
+                              for buy_quote in buy_quotes if quote.dt == buy_quote.dt]
+                    size = [250.0 for _ in buy_quotes]
+                    ax.scatter(norm_dates, scores, s=size, color='b', alpha=0.8)
+
 
         # format the ticks
         ax.xaxis.set_major_locator(hours)
@@ -293,8 +344,9 @@ class Stock(object):
 #
 # Collect intraday quote for a symbol.
 #
-def CollectIntradayQuote(symbol, interval_seconds, num_days):
-    stock = Stock(symbol, interval_seconds)
+def CollectIntradayQuote(record, interval_seconds, num_days):
+    symbol = record["symbol"]
+    stock = Stock(symbol, interval_seconds, buys=record.get("buy", []), sells=record.get("sell", []))
     url = ctrl['URL']
     url += "q={0}&i={1}&p={2}d&f=d,o,h,l,c,v".format(symbol,interval_seconds,num_days)
     csv = requests.get(url).text.encode('utf-8').split('\n')
@@ -340,6 +392,6 @@ except IOError as e:
 
 print "Now", datetime.datetime.now()
 
-for symbol in ctrl["Symbols"]:
-    stock = CollectIntradayQuote(symbol["symbol"], ctrl["Interval"], ctrl["Days"])
+for record in ctrl["Records"]:
+    stock = CollectIntradayQuote(record, ctrl["Interval"], ctrl["Days"])
     stock.plot()

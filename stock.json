@@ -2,11 +2,14 @@
     "URL" : "http://www.google.com/finance/getprices?",
     "UTC" : -8,
     "Interval" : 300,
-    "Days" : 5,
-    "ChartType" : "median",
-    "Symbols": [
+    "Days" : 15,
+    "ChartType" : "knn",
+    "Records": [
         {
-            "symbol" : "INTC"
+            "symbol" : "INTC",
+            "buy" : ["2016-5-17 12:30:32",
+                     "2016-5-18 6:44:00",
+                     "2016-5-13 9:40:10"]
         }
     ]
 }
