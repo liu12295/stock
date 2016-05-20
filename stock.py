@@ -52,7 +52,7 @@ class Quote(object):
         return self.dt.day
 
     def get_median(self):
-        return np.median(np.array([self.o,self.h,self.l,self.c]))
+        return (self.o + self.c) / 2
 
     # Return the median price of this quote wrt ref price.
     def get_ratio(self,ref):
@@ -101,17 +101,10 @@ class Stock(object):
         for buy in self.buys:
             if (buy > quotes[-1].dt) or (buy < quotes[0].dt):
                 continue
-
-            last_quote = quotes[0]
             for quote in quotes:
-                if quote.dt == buy:
+                if quote.dt >= buy:
                     results.append(quote)
                     break;
-                elif quote.dt > buy:
-                    results.append(last_quote)
-                    break;
-                else:
-                    last_quote = quote
 
         return results;
 
@@ -148,7 +141,7 @@ class Stock(object):
         prev_close_price = self.get_yesterday_close_price();
         ref_ratio = (open_price - prev_close_price) / prev_close_price
         print "KNN ratio: ", prev_close_price, open_price, ref_ratio
-        sys.stdout.flush()
+
         prev_close_price = 1
         
         for page_num, quotes in self.book.iteritems():
@@ -218,6 +211,13 @@ class Stock(object):
     def is_last_page(self, page_num):
         return page_num == self.book.keys()[-1];
 
+    def get_local_time(self):
+        now = datetime.datetime.now()
+        local_hr = now.hour + ctrl['UTC']
+        if local_hr < 0:
+            local_hr += 24
+        return (local_hr, now.minute, now.second)
+
     def write2csv(self):
         if not self.book:
             return
@@ -265,6 +265,18 @@ class Stock(object):
         num_days = len(self.book)
         gradient = 1.0;
 
+        # How much can we profit if we trade at this moment
+        historical_max_profits = []
+        historical_risk = []        
+
+        (local_hr, local_min, local_sec) = self.get_local_time()
+        ref_datetime = datetime.datetime(1971, 1, 1)
+        if local_hr >= 6 and local_hr <= 13:
+            ref_datetime = datetime.datetime(1971, 1, 1, \
+                                             local_hr, local_min, local_sec)
+
+        print "Reference time:", ref_datetime
+
         #
         # Walk thru each day
         #
@@ -276,10 +288,24 @@ class Stock(object):
             if not scores:
                 continue;
 
-            # Keep the mapping for later highlighting use
-            if self.buys or self.sells:
-                quotes_2_scores = dict(zip(quotes, scores))
+            # Keep the mapping for later reference.
+            quotes_2_scores = OrderedDict(zip(quotes, scores))
 
+            # Compute historical_max_profits using current quotes
+            min_score = max_score = base = scores[0]
+            _last_quote_dt = quotes[0].dt
+            
+            for quote, score in quotes_2_scores.iteritems():
+                assert(_last_quote_dt <= quote.dt)
+                _last_quote_dt = quote.dt
+                if quote.get_normalized_dt() <= ref_datetime:
+                    min_score = max_score = base = score
+                else:
+                    max_score = max(max_score, score)
+                    min_score = min(min_score, score)                    
+
+            historical_max_profits.append(max_score - base)
+            historical_risk.append(min_score - base)            
             # Make sure quotes are listed in order
             assert(last_quote_dt < quotes[0].dt)
             last_quote_dt = quotes[0].dt
@@ -302,9 +328,10 @@ class Stock(object):
                          label=str(last_quote.dt.month)+'/'+str(last_quote.dt.day))
 
             ax.text(last_quote.dt, last_quote.c, str(last_quote.c), fontsize=12, color='g')
-            gradient -= (1.0 / float(num_days - 1));
 
-            # Highlight the buys
+            #
+            # Highlight the buys using big green dots
+            #
             if self.buys:
                 buy_quotes = self.get_buy_quotes(quotes)
                 if buy_quotes:
@@ -314,7 +341,20 @@ class Stock(object):
                     size = [250.0 for _ in buy_quotes]
                     ax.scatter(norm_dates, scores, s=size, color='b', alpha=0.8)
 
+            # Adjust gradient for next page's quotes
+            gradient -= (1.0 / float(num_days - 1));
 
+
+        latest_quote = self.get_latest_quote();
+
+        #
+        # Print out prediction before showing the chart
+        #
+        print self.symbol, "now @", latest_quote.c
+        print "Current expected profit: ", np.mean(historical_max_profits)
+        print "Current expected risk:  ", np.mean(historical_risk)
+        sys.stdout.flush()
+        
         # format the ticks
         ax.xaxis.set_major_locator(hours)
         ax.xaxis.set_major_formatter(hoursFmt)
@@ -335,10 +375,13 @@ class Stock(object):
         plt.ylabel(ctrl['ChartType'])
         plt.xlabel('Interval ' + str(self.interval_seconds / 60.0) + ' min')
 
-        q = self.get_latest_quote();
-        plt.title(self.symbol + " in last " + str(num_days) + " days" + " @" + str(q.c))
+        title = self.symbol + " in last " + str(num_days) + " days" + " @" + str(latest_quote.c)
+        title += " [Downwards:" + str(np.mean(historical_risk))
+        title += " Upwards:" + str(np.mean(historical_max_profits)) + "]"
+        plt.title(title)
         
         plt.show()
+
         return
 
 #
@@ -346,9 +389,11 @@ class Stock(object):
 #
 def CollectIntradayQuote(record, interval_seconds, num_days):
     symbol = record["symbol"]
-    stock = Stock(symbol, interval_seconds, buys=record.get("buy", []), sells=record.get("sell", []))
+    stock = Stock(symbol, interval_seconds, buys=record.get("buy", []), \
+                  sells=record.get("sell", []))
     url = ctrl['URL']
     url += "q={0}&i={1}&p={2}d&f=d,o,h,l,c,v".format(symbol,interval_seconds,num_days)
+    print "Query", url
     csv = requests.get(url).text.encode('utf-8').split('\n')
 
     _, timezone_offset = csv[6].split('=')
@@ -389,8 +434,6 @@ try:
         ctrl = json.load(f);
 except IOError as e:
     sys.exit( "I/O error({0}): {1}".format(e.errno, e.strerror) + ": stock.json")
-
-print "Now", datetime.datetime.now()
 
 for record in ctrl["Records"]:
     stock = CollectIntradayQuote(record, ctrl["Interval"], ctrl["Days"])
