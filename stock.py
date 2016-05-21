@@ -172,17 +172,17 @@ class Stock(object):
     # Given a sequence of quotes, retun a list of
     # scores depending on ChartType.
     #
-    def compute_scores(self, quotes):
+    def compute_scores(self, quotes, chart_type):
         # Use close price as score
-        if ctrl['ChartType'].lower() == "close":
+        if chart_type == "close":
             return [q.c for q in quotes]
 
         # Use median price
-        if ctrl['ChartType'].lower() == "median":
+        if chart_type == "median":
             return [q.get_median() for q in quotes]
         
         # K-nearest neighbors
-        if ctrl['ChartType'].lower() == "knn":
+        if chart_type == "knn":
             if self.is_knn_candidate(quotes):
                 return [q.get_ratio(quotes[0].o) for q in quotes]
             else:
@@ -214,9 +214,23 @@ class Stock(object):
     def get_local_time(self):
         now = datetime.datetime.now()
         local_hr = now.hour + ctrl['UTC']
+        local_day = now.day
         if local_hr < 0:
             local_hr += 24
-        return (local_hr, now.minute, now.second)
+            local_day -= 1
+        return (local_day, local_hr, now.minute, now.second)
+
+    def is_market_closed(self):
+        (local_day, local_hr, local_min, local_sec) = self.get_local_time()
+        last_quote_dt = self.get_latest_quote().dt
+        if local_day != last_quote_dt.day:
+            return True
+        if local_hr < 6 or local_hr > 13:
+            return True
+        return False
+
+    def is_market_open(self):
+        return not self.is_market_closed()
 
     def write2csv(self):
         if not self.book:
@@ -241,13 +255,13 @@ class Stock(object):
         return
 
     # Plot the history for current symbol
-    def plot(self):
+    def plot(self, chart_type="close"):
         if not self.book:
             print "Not enough data to plot"
             return
 
         # Prepare data for KNN
-        if ctrl['ChartType'].lower() == "knn":
+        if chart_type == "knn":
             if self.prepare_knn_candidate_set() < 2:
                 print "No candidate for KNN plot"
                 return
@@ -269,11 +283,13 @@ class Stock(object):
         historical_max_profits = []
         historical_risk = []        
 
-        (local_hr, local_min, local_sec) = self.get_local_time()
-        ref_datetime = datetime.datetime(1971, 1, 1)
-        if local_hr >= 6 and local_hr <= 13:
+        (_, local_hr, local_min, local_sec) = self.get_local_time()
+        
+        if self.is_market_open():
             ref_datetime = datetime.datetime(1971, 1, 1, \
                                              local_hr, local_min, local_sec)
+        else:
+            ref_datetime = datetime.datetime(1971, 1, 1)
 
         print "Reference time:", ref_datetime
 
@@ -283,7 +299,7 @@ class Stock(object):
         last_quote_dt = datetime.datetime.fromtimestamp(0);
 
         for page_num, quotes in self.book.iteritems():
-            scores = self.compute_scores(quotes)
+            scores = self.compute_scores(quotes, chart_type)
 
             if not scores:
                 continue;
@@ -372,12 +388,12 @@ class Stock(object):
         
         plt.legend(loc='best', shadow=True)
         plt.tick_params(axis='y', which='both', labelleft='on', labelright='on')
-        plt.ylabel(ctrl['ChartType'])
+        plt.ylabel(chart_type)
         plt.xlabel('Interval ' + str(self.interval_seconds / 60.0) + ' min')
 
         title = self.symbol + " in last " + str(num_days) + " days" + " @" + str(latest_quote.c)
-        title += " [Downwards:" + str(np.mean(historical_risk))
-        title += " Upwards:" + str(np.mean(historical_max_profits)) + "]"
+        title += " [Dn:" + str(np.mean(historical_risk))
+        title += " Up:" + str(np.mean(historical_max_profits)) + "]"
         plt.title(title)
         
         plt.show()
@@ -388,9 +404,9 @@ class Stock(object):
 # Collect intraday quote for a symbol.
 #
 def CollectIntradayQuote(record, interval_seconds, num_days):
-    symbol = record["symbol"]
-    stock = Stock(symbol, interval_seconds, buys=record.get("buy", []), \
-                  sells=record.get("sell", []))
+    symbol = record["Symbol"]
+    stock = Stock(symbol, interval_seconds, buys=record.get("Buy", []), \
+                  sells=record.get("Sell", []))
     url = ctrl['URL']
     url += "q={0}&i={1}&p={2}d&f=d,o,h,l,c,v".format(symbol,interval_seconds,num_days)
     print "Query", url
@@ -437,4 +453,4 @@ except IOError as e:
 
 for record in ctrl["Records"]:
     stock = CollectIntradayQuote(record, ctrl["Interval"], ctrl["Days"])
-    stock.plot()
+    stock.plot(record['ChartType'].lower())
