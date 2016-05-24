@@ -395,6 +395,12 @@ class Stock(object):
         title += " [Dn:" + str(np.mean(historical_risk))
         title += " Up:" + str(np.mean(historical_max_profits)) + "]"
         plt.title(title)
+
+        # Draw a vertical timeline using ref_datetime
+        x1 = x2 = ref_datetime,ref_datetime
+        y1 = scores[-1] + np.mean(historical_risk)
+        y2 = scores[-1] + np.mean(historical_max_profits)
+        plt.plot((x1, x2), (y1, y2), 'r', marker='_', linewidth=2, linestyle='dashed')
         
         plt.show()
 

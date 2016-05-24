@@ -5,8 +5,15 @@
     "Days" : 15,
     "Records": [
         {
-            "Symbol" : "GOOGL",
+            "Symbol" : "AAPL",
             "ChartType" : "knn",
+            "Buy" : [
+                "2016-5-18 6:44:00"
+            ]
+        },
+        {
+            "Symbol" : "AAPL",
+            "ChartType" : "close",
             "Buy" : [
                 "2016-5-18 6:44:00"
             ]
