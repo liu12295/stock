@@ -225,7 +225,7 @@ class Stock(object):
         last_quote_dt = self.get_latest_quote().dt
         if local_day != last_quote_dt.day:
             return True
-        if local_hr < 6 or local_hr > 13:
+        if local_hr < 6 or local_hr >= 13:
             return True
         return False
 
@@ -289,7 +289,7 @@ class Stock(object):
             ref_datetime = datetime.datetime(1971, 1, 1, \
                                              local_hr, local_min, local_sec)
         else:
-            ref_datetime = datetime.datetime(1971, 1, 1)
+            ref_datetime = datetime.datetime(1971, 1, 1, 6, 20)
 
         print "Reference time:", ref_datetime
 
@@ -398,8 +398,12 @@ class Stock(object):
 
         # Draw a vertical timeline using ref_datetime
         x1 = x2 = ref_datetime,ref_datetime
-        y1 = scores[-1] + np.mean(historical_risk)
-        y2 = scores[-1] + np.mean(historical_max_profits)
+        if chart_type == 'knn':
+            y1 = np.mean(historical_risk)
+            y2 = np.mean(historical_max_profits)
+        else:
+            y1 = latest_quote.c + np.mean(historical_risk)
+            y2 = latest_quote.c + np.mean(historical_max_profits)
         plt.plot((x1, x2), (y1, y2), 'r', marker='_', linewidth=2, linestyle='dashed')
         
         plt.show()
@@ -420,7 +424,7 @@ def CollectIntradayQuote(record, interval_seconds, num_days):
 
     _, timezone_offset = csv[6].split('=')
     # Adjust timezone wrt UTC
-    timezone_offset = float(timezone_offset) + (ctrl["UTC"] * 60 * 60)
+    timezone_offset = (0 * float(timezone_offset)) + (ctrl["UTC"] * 60 * 60)
 
     for row in csv[7:]:
         fields = row.split(',')
