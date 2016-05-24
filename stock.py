@@ -32,6 +32,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.finance import quotes_historical_yahoo_ochl
 from matplotlib.dates import HourLocator, MinuteLocator, SecondLocator, DateFormatter
+from matplotlib.patches import Ellipse
 
 ctrl = {}
 
@@ -385,27 +386,50 @@ class Stock(object):
         ax.grid(True)
 
         fig.autofmt_xdate()
-        
-        plt.legend(loc='best', shadow=True)
+
+        # Don't bother to show legend if we plot too much.
+        if num_days <= 5:
+            plt.legend(loc='best', shadow=True)
         plt.tick_params(axis='y', which='both', labelleft='on', labelright='on')
         plt.ylabel(chart_type)
         plt.xlabel('Interval ' + str(self.interval_seconds / 60.0) + ' min')
 
         title = self.symbol + " in last " + str(num_days) + " days" + " @" + str(latest_quote.c)
-        title += " [Dn:" + str(np.mean(historical_risk))
-        title += " Up:" + str(np.mean(historical_max_profits)) + "]"
         plt.title(title)
 
-        # Draw a vertical timeline using ref_datetime
-        x1 = x2 = ref_datetime,ref_datetime
-        if chart_type == 'knn':
-            y1 = np.mean(historical_risk)
-            y2 = np.mean(historical_max_profits)
-        else:
-            y1 = latest_quote.c + np.mean(historical_risk)
-            y2 = latest_quote.c + np.mean(historical_max_profits)
+        #
+        # Draw a vertical line using ref_datetime as time, and swings as bounds.
+        #
+        x1 = x2 = ref_datetime
+        y1 = np.mean(historical_risk)
+        y2 = np.mean(historical_max_profits)
+
+        if chart_type != 'knn':
+            y1 += latest_quote.c
+            y2 += latest_quote.c
+
         plt.plot((x1, x2), (y1, y2), 'r', marker='_', linewidth=2, linestyle='dashed')
+
+        # Annotate the bounds
+        ax.annotate(str(y1), xy=(x1, y1), xycoords='data',
+                    xytext=(-10, -40), textcoords='offset points',
+                    size=15,
+                    arrowprops=dict(arrowstyle="fancy",
+                                    fc="0.6", ec="none",
+                                    patchB=Ellipse((2, -1), 0.5, 0.5),
+                                    connectionstyle="angle3,angleA=0,angleB=-90"),
+        )
         
+        ax.annotate(str(y2), xy=(x2, y2), xycoords='data',
+                    xytext=(10, 40), textcoords='offset points',
+                    size=15,
+                    arrowprops=dict(arrowstyle="fancy",
+                                    fc="0.6", ec="none",
+                                    patchB=Ellipse((2, -1), 0.5, 0.5),
+                                    connectionstyle="angle3,angleA=0,angleB=-90"),
+        )
+        
+        # Draw it!
         plt.show()
 
         return
