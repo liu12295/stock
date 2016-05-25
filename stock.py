@@ -368,8 +368,8 @@ class Stock(object):
         # Print out prediction before showing the chart
         #
         print self.symbol, "now @", latest_quote.c
-        print "Current expected profit: ", np.mean(historical_max_profits)
-        print "Current expected risk:  ", np.mean(historical_risk)
+        print "Current expected profit: ", ('%.3f' % np.mean(historical_max_profits))
+        print "Current expected risk:  ",  ('%.3f' % np.mean(historical_risk))
         sys.stdout.flush()
         
         # format the ticks
@@ -401,17 +401,15 @@ class Stock(object):
         # Draw a vertical line using ref_datetime as time, and swings as bounds.
         #
         x1 = x2 = ref_datetime
-        y1 = np.mean(historical_risk)
-        y2 = np.mean(historical_max_profits)
+        y1 = scores[-1] + np.mean(historical_risk)
+        y2 = scores[-1] + np.mean(historical_max_profits)
 
-        if chart_type != 'knn':
-            y1 += latest_quote.c
-            y2 += latest_quote.c
-
-        plt.plot((x1, x2), (y1, y2), 'r', marker='_', linewidth=2, linestyle='dashed')
+        plt.plot((x1, x2), (y1, y2), 'r', marker='_', linewidth=3, linestyle='dashed')
 
         # Annotate the bounds
-        ax.annotate(str(y1), xy=(x1, y1), xycoords='data',
+        ax.annotate('%.3f' % y1, xy=(x1, y1), xycoords='data',
+                    alpha=.9,
+                    bbox=dict(boxstyle="round4", fc="w"),                    
                     xytext=(-10, -40), textcoords='offset points',
                     size=15,
                     arrowprops=dict(arrowstyle="fancy",
@@ -420,7 +418,9 @@ class Stock(object):
                                     connectionstyle="angle3,angleA=0,angleB=-90"),
         )
         
-        ax.annotate(str(y2), xy=(x2, y2), xycoords='data',
+        ax.annotate('%.3f' % y2, xy=(x2, y2), xycoords='data',
+                    alpha=.9,
+                    bbox=dict(boxstyle="round4", fc="w"),                    
                     xytext=(10, 40), textcoords='offset points',
                     size=15,
                     arrowprops=dict(arrowstyle="fancy",
