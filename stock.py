@@ -91,7 +91,7 @@ class Stock(object):
 
         self.buys.sort()
         self.sells.sort()
-            
+
         return
 
     # Given a list of quotes, return a sub-list of it that have buy events
@@ -352,11 +352,11 @@ class Stock(object):
             if self.buys:
                 buy_quotes = self.get_buy_quotes(quotes)
                 if buy_quotes:
-                    norm_dates  = [q.get_normalized_dt() for q in buy_quotes]
-                    scores = [score for quote, score in quotes_2_scores.iteritems() \
-                              for buy_quote in buy_quotes if quote.dt == buy_quote.dt]
-                    size = [250.0 for _ in buy_quotes]
-                    ax.scatter(norm_dates, scores, s=size, color='b', alpha=0.8)
+                    _norm_dates  = [q.get_normalized_dt() for q in buy_quotes]
+                    _scores = [score for quote, score in quotes_2_scores.iteritems() \
+                               for buy_quote in buy_quotes if quote.dt == buy_quote.dt]
+                    _size = [200.0 for _ in buy_quotes]
+                    ax.scatter(_norm_dates, _scores, s=_size, color='b', alpha=0.8)
 
             # Adjust gradient for next page's quotes
             gradient -= (1.0 / float(num_days - 1));
@@ -370,7 +370,6 @@ class Stock(object):
         print self.symbol, "now @", latest_quote.c
         print "Current expected profit: ", ('%.3f' % np.mean(historical_max_profits))
         print "Current expected risk:  ",  ('%.3f' % np.mean(historical_risk))
-        sys.stdout.flush()
         
         # format the ticks
         ax.xaxis.set_major_locator(hours)
@@ -429,7 +428,8 @@ class Stock(object):
                                     connectionstyle="angle3,angleA=0,angleB=-90"),
         )
         
-        # Draw it!
+        # Flush whatever we have, and draw it!
+        sys.stdout.flush()
         plt.show()
 
         return
