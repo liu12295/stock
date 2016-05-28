@@ -64,6 +64,97 @@ class Quote(object):
         return datetime.datetime(1971, 1, 1, \
                                  self.dt.hour, self.dt.minute, self.dt.second) 
 
+#
+# Class Plot
+#
+class Plot(object):
+    def __init__(self, chart_type):
+        self.markers = ['o', 'v', '^', 's', 'p', '*', 'h', 'H', 'D', 'd']
+        self.ls = ['dashed', 'dashdot', 'dotted']
+        self.hours   = HourLocator()    # every hour
+        self.minutes = MinuteLocator()  # every minute
+        self.seconds = SecondLocator()  # every second
+        self.hoursFmt = DateFormatter('%H')
+        self.fig, self.ax = plt.subplots(figsize=(20, 10))
+        self.chart_type = chart_type
+        return
+
+    def plot_scores(self, dates, scores, mfc, marker, quote):
+        self.ax.plot_date(dates, scores,
+                          ls=random.choice(self.ls), marker=marker,
+                          markersize=5.0, markerfacecolor=mfc,
+                          label=str(quote.dt.month)+'/'+str(quote.dt.day))
+
+        self.ax.text(quote.dt, quote.c, str(quote.c), fontsize=12, color='g')
+        return
+
+    def plot_buys(self, buy_quotes, quotes_2_scores):
+        if not buy_quotes:
+            return
+        norm_dates  = [q.get_normalized_dt() for q in buy_quotes]
+        scores = [score for quote, score in quotes_2_scores.iteritems() \
+                  for buy_quote in buy_quotes if quote.dt == buy_quote.dt]
+        size = [200.0 for _ in buy_quotes]
+        self.ax.scatter(norm_dates, scores, s=size, color='b', alpha=0.8)
+        return
+
+    def plot_future(self, future_scores):
+        (dates, scores) = zip(*future_scores)
+
+        self.ax.plot_date(dates, scores,
+                          ls=random.choice(self.ls), marker='D',
+                          markersize=5.0, markerfacecolor='g',
+                          label='future')
+        return
+
+    def format_ticks(self):
+        self.ax.xaxis.set_major_locator(self.hours)
+        self.ax.xaxis.set_major_formatter(self.hoursFmt)
+        self.ax.xaxis.set_minor_locator(self.minutes)
+        self.ax.autoscale_view()
+
+        # format the coords message box
+        def price(x):
+            return '$%.3f' % x
+        self.ax.fmt_xdata = DateFormatter('%H-%M-%S')
+        self.ax.fmt_ydata = price
+        self.ax.grid(True)
+
+        self.fig.autofmt_xdate()
+
+        #self.plt.legend(loc='best', shadow=True)
+        plt.tick_params(axis='y', which='both', labelleft='on', labelright='on')
+        
+        return
+
+    def format_labels(self, interval_seconds):
+        plt.ylabel(self.chart_type)
+        plt.xlabel('Interval ' + str(interval_seconds / 60.0) + ' min')
+        return
+
+    def format_title(self, title):
+        plt.title(title)
+        return
+
+    def show(self):
+        sys.stdout.flush()
+        plt.show()
+        return
+
+    def annotate(self, x, y):
+        self.ax.annotate('%.3f' % y, xy=(x, y), xycoords='data',
+                         bbox=dict(boxstyle="round4", fc="w", alpha=0.75),
+                         xytext=(-80, -60), textcoords='offset points',
+                         size=15,
+                         arrowprops=dict(arrowstyle="fancy",
+                                         fc="0.8", ec="none",
+                                         patchB=Ellipse((2, -1), 0.5, 0.5),
+                                         connectionstyle="angle3,angleA=0,angleB=-90"),
+        )
+        return
+#
+#
+#
 class Stock(object):
     def __repr__(self):
         return "Stock()"
@@ -299,15 +390,7 @@ class Stock(object):
                 print "No candidate for KNN plot"
                 return
 
-        markers = ['o', 'v', '^', 's', 'p', '*', 'h', 'H', 'D', 'd']
-        ls = ['dashed', 'dashdot', 'dotted']
-    
-        hours   = HourLocator()    # every hour
-        minutes = MinuteLocator()  # every minute
-        seconds = SecondLocator()  # every second
-        hoursFmt = DateFormatter('%H')
-
-        fig, ax = plt.subplots(figsize=(20, 10))
+        plot = Plot(chart_type);
 
         num_days = len(self.book)
         gradient = 1.0;
@@ -350,7 +433,6 @@ class Stock(object):
             
             # Normalize the year/month/day, since the chart only cares about hr/min/sec
             norm_dates  = [q.get_normalized_dt() for q in quotes]
-            last_quote = quotes[0]
 
             # Quotes from last page worths more attention.
             if self.is_last_page(page_num):
@@ -358,39 +440,23 @@ class Stock(object):
                 marker = 'D'
             else:
                 mfc = str(gradient)
-                marker = random.choice(markers)
+                marker = random.choice(plot.markers)
 
-            ax.plot_date(norm_dates, scores, \
-                         ls=random.choice(ls), marker=marker, \
-                         markersize=5.0, markerfacecolor=mfc, \
-                         label=str(last_quote.dt.month)+'/'+str(last_quote.dt.day))
-
-            ax.text(last_quote.dt, last_quote.c, str(last_quote.c), fontsize=12, color='g')
+            plot.plot_scores(norm_dates, scores, mfc, marker, quotes[0])
 
             #
             # Highlight the buys using big green dots
             #
-            if self.buys:
-                buy_quotes = self.get_buy_quotes(quotes)
-                if buy_quotes:
-                    _norm_dates  = [q.get_normalized_dt() for q in buy_quotes]
-                    _scores = [score for quote, score in quotes_2_scores.iteritems() \
-                               for buy_quote in buy_quotes if quote.dt == buy_quote.dt]
-                    _size = [200.0 for _ in buy_quotes]
-                    ax.scatter(_norm_dates, _scores, s=_size, color='b', alpha=0.8)
+            plot.plot_buys(self.get_buy_quotes(quotes), quotes_2_scores)
 
             # Adjust gradient for next page's quotes
             gradient -= (1.0 / float(num_days - 1));
 
         # Compute future scores based on historical data
         future_scores = self.compute_future_scores(historical, opening_score)
-        (norm_dates, scores) = zip(*future_scores)
 
         # Plot future scores
-        ax.plot_date(norm_dates, scores, \
-                     ls=random.choice(ls), marker='D', \
-                     markersize=5.0, markerfacecolor='g', \
-                     label='future')
+        plot.plot_future(future_scores)
 
         #
         # Print out prediction before showing the chart
@@ -398,63 +464,22 @@ class Stock(object):
         latest_quote = self.get_latest_quote();
         print self.symbol, "now @", latest_quote.c
         
-        # format the ticks
-        ax.xaxis.set_major_locator(hours)
-        ax.xaxis.set_major_formatter(hoursFmt)
-        ax.xaxis.set_minor_locator(minutes)
-        ax.autoscale_view()
-
-        # format the coords message box
-        def price(x):
-            return '$%.3f' % x
-        ax.fmt_xdata = DateFormatter('%H-%M-%S')
-        ax.fmt_ydata = price
-        ax.grid(True)
-
-        fig.autofmt_xdate()
-
-        # Don't bother to show legend if we plot too much.
-        if num_days <= 5:
-            plt.legend(loc='best', shadow=True)
-        plt.tick_params(axis='y', which='both', labelleft='on', labelright='on')
-        plt.ylabel(chart_type)
-        plt.xlabel('Interval ' + str(self.interval_seconds / 60.0) + ' min')
-
+        # format the ticks and labels
+        plot.format_ticks()
+        plot.format_labels(self.interval_seconds)
         title = self.symbol + " in last " + str(num_days) + " days" + " @" + str(latest_quote.c)
-        plt.title(title)
+        plot.format_title(title)
 
         #
-        # Draw a vertical line using ref_datetime as time, and swings as bounds.
+        # Annotate the min/max points
         #
         (x1, y1) = max(future_scores, key=operator.itemgetter(1))
         (x2, y2) = min(future_scores, key=operator.itemgetter(1))
-
-        # Annotate the bounds
-        ax.annotate('%.3f' % y1, xy=(x1, y1), xycoords='data',
-                    alpha=.9,
-                    bbox=dict(boxstyle="round4", fc="w"),                    
-                    xytext=(-10, -40), textcoords='offset points',
-                    size=15,
-                    arrowprops=dict(arrowstyle="fancy",
-                                    fc="0.6", ec="none",
-                                    patchB=Ellipse((2, -1), 0.5, 0.5),
-                                    connectionstyle="angle3,angleA=0,angleB=-90"),
-        )
-        
-        ax.annotate('%.3f' % y2, xy=(x2, y2), xycoords='data',
-                    alpha=.9,
-                    bbox=dict(boxstyle="round4", fc="w"),                    
-                    xytext=(10, 40), textcoords='offset points',
-                    size=15,
-                    arrowprops=dict(arrowstyle="fancy",
-                                    fc="0.6", ec="none",
-                                    patchB=Ellipse((2, -1), 0.5, 0.5),
-                                    connectionstyle="angle3,angleA=0,angleB=-90"),
-        )
+        plot.annotate(x1, y1)
+        plot.annotate(x2, y2)
         
         # Flush whatever we have, and draw it!
-        sys.stdout.flush()
-        plt.show()
+        plot.show()
 
         return
 
@@ -463,7 +488,7 @@ class Stock(object):
 #
 def CollectIntradayQuote(record, interval_seconds, num_days):
     symbol = record["Symbol"]
-    stock = Stock(symbol, interval_seconds, buys=record.get("Buy", []), \
+    stock = Stock(symbol, interval_seconds, buys=record.get("Buy", []),
                   sells=record.get("Sell", []))
     url = ctrl['URL']
     url += "q={0}&i={1}&p={2}d&f=d,o,h,l,c,v".format(symbol,interval_seconds,num_days)
