@@ -27,6 +27,7 @@ from collections import OrderedDict
 import csv, json, re, sys
 import requests
 import random
+import operator
 import numpy as np
 
 import matplotlib.pyplot as plt
@@ -56,12 +57,12 @@ class Quote(object):
         return (self.o + self.c) / 2
 
     # Return the median price of this quote wrt ref price.
-    def get_ratio(self,ref):
-        return  ((self.get_median() - ref) / ref)
+    def get_ratio(self,ref_score):
+        return  ((self.get_median() - ref_score) / ref_score)
 
     def get_normalized_dt(self):
         return datetime.datetime(1971, 1, 1, \
-                                 self.dt.hour,self.dt.minute, second=self.dt.second) 
+                                 self.dt.hour, self.dt.minute, self.dt.second) 
 
 class Stock(object):
     def __repr__(self):
@@ -175,15 +176,15 @@ class Stock(object):
     #
     def compute_scores(self, quotes, chart_type):
         # Use close price as score
-        if chart_type == "close":
+        if chart_type == 'close':
             return [q.c for q in quotes]
 
         # Use median price
-        if chart_type == "median":
+        if chart_type == 'median':
             return [q.get_median() for q in quotes]
         
         # K-nearest neighbors
-        if chart_type == "knn":
+        if chart_type == 'knn':
             if self.is_knn_candidate(quotes):
                 return [q.get_ratio(quotes[0].o) for q in quotes]
             else:
@@ -255,14 +256,45 @@ class Stock(object):
                     w.writerow(quote.__dict__)
         return
 
+    #
+    # Return reference datetime which shows where the quote is at this moment
+    #
+    def get_ref_datetime(self) :
+        (_, local_hr, local_min, local_sec) = self.get_local_time()
+        
+        if self.is_market_open():
+            ref_datetime = datetime.datetime(1971, 1, 1, \
+                                             local_hr, local_min, local_sec)
+        else:
+            ref_datetime = datetime.datetime(1971, 1, 1, 6, 20)
+        return ref_datetime
+
+    #
+    # Compute today's future scores based on historical scores and today's
+    # opening score.
+    #
+    def compute_future_scores(self, hist, opening_score):
+        future = []
+        prev_hist_score = hist.itervalues().next()
+        prev_score = opening_score
+
+        for dt, score in hist.iteritems():
+            delta_score = [a - b for (a, b) in zip(score, prev_hist_score)]
+            future_score = np.mean(delta_score) + prev_score
+            future.append((dt, future_score))
+            prev_hist_score = score
+            prev_score = future_score
+
+        return future
+    
     # Plot the history for current symbol
-    def plot(self, chart_type="close"):
+    def plot(self, chart_type='close'):
         if not self.book:
             print "Not enough data to plot"
             return
 
         # Prepare data for KNN
-        if chart_type == "knn":
+        if chart_type == 'knn':
             if self.prepare_knn_candidate_set() < 2:
                 print "No candidate for KNN plot"
                 return
@@ -280,50 +312,39 @@ class Stock(object):
         num_days = len(self.book)
         gradient = 1.0;
 
-        # How much can we profit if we trade at this moment
-        historical_max_profits = []
-        historical_risk = []        
-
-        (_, local_hr, local_min, local_sec) = self.get_local_time()
-        
-        if self.is_market_open():
-            ref_datetime = datetime.datetime(1971, 1, 1, \
-                                             local_hr, local_min, local_sec)
-        else:
-            ref_datetime = datetime.datetime(1971, 1, 1, 6, 20)
-
+        ref_datetime = self.get_ref_datetime()
         print "Reference time:", ref_datetime
 
+        last_quote_dt = datetime.datetime.fromtimestamp(0);
+        last_score = 0.0
+        opening_score = 0.0
+        
         #
         # Walk thru each day
         #
-        last_quote_dt = datetime.datetime.fromtimestamp(0);
+
+        # historical[normalized_dt] is a list of scores happened at that time.
+        # We use historcial later to estimate future scores
+        historical = OrderedDict()
 
         for page_num, quotes in self.book.iteritems():
             scores = self.compute_scores(quotes, chart_type)
-
             if not scores:
                 continue;
 
+            last_score = scores[-1]
+            opening_score = scores[0]
             # Keep the mapping for later reference.
             quotes_2_scores = OrderedDict(zip(quotes, scores))
 
-            # Compute historical_max_profits using current quotes
-            min_score = max_score = base = scores[0]
-            _last_quote_dt = quotes[0].dt
-            
+            # Update historical
             for quote, score in quotes_2_scores.iteritems():
-                assert(_last_quote_dt <= quote.dt)
-                _last_quote_dt = quote.dt
-                if quote.get_normalized_dt() <= ref_datetime:
-                    min_score = max_score = base = score
-                else:
-                    max_score = max(max_score, score)
-                    min_score = min(min_score, score)                    
+                _norm_dt = quote.get_normalized_dt()
+                if not historical.has_key(_norm_dt):
+                    historical[_norm_dt] = []
+                historical[_norm_dt].append(score)
 
-            historical_max_profits.append(max_score - base)
-            historical_risk.append(min_score - base)            
-            # Make sure quotes are listed in order
+            # Make sure quotes are listed in ascending order
             assert(last_quote_dt < quotes[0].dt)
             last_quote_dt = quotes[0].dt
             
@@ -361,15 +382,21 @@ class Stock(object):
             # Adjust gradient for next page's quotes
             gradient -= (1.0 / float(num_days - 1));
 
+        # Compute future scores based on historical data
+        future_scores = self.compute_future_scores(historical, opening_score)
+        (norm_dates, scores) = zip(*future_scores)
 
-        latest_quote = self.get_latest_quote();
+        # Plot future scores
+        ax.plot_date(norm_dates, scores, \
+                     ls=random.choice(ls), marker='D', \
+                     markersize=5.0, markerfacecolor='g', \
+                     label='future')
 
         #
         # Print out prediction before showing the chart
         #
+        latest_quote = self.get_latest_quote();
         print self.symbol, "now @", latest_quote.c
-        print "Current expected profit: ", ('%.3f' % np.mean(historical_max_profits))
-        print "Current expected risk:  ",  ('%.3f' % np.mean(historical_risk))
         
         # format the ticks
         ax.xaxis.set_major_locator(hours)
@@ -379,7 +406,7 @@ class Stock(object):
 
         # format the coords message box
         def price(x):
-            return '$%1.2f' % x
+            return '$%.3f' % x
         ax.fmt_xdata = DateFormatter('%H-%M-%S')
         ax.fmt_ydata = price
         ax.grid(True)
@@ -399,11 +426,8 @@ class Stock(object):
         #
         # Draw a vertical line using ref_datetime as time, and swings as bounds.
         #
-        x1 = x2 = ref_datetime
-        y1 = scores[-1] + np.mean(historical_risk)
-        y2 = scores[-1] + np.mean(historical_max_profits)
-
-        plt.plot((x1, x2), (y1, y2), 'r', marker='_', linewidth=3, linestyle='dashed')
+        (x1, y1) = max(future_scores, key=operator.itemgetter(1))
+        (x2, y2) = min(future_scores, key=operator.itemgetter(1))
 
         # Annotate the bounds
         ax.annotate('%.3f' % y1, xy=(x1, y1), xycoords='data',
