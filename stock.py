@@ -147,7 +147,7 @@ class Plot(object):
                          xytext=(-80, -60), textcoords='offset points',
                          size=15,
                          arrowprops=dict(arrowstyle="fancy",
-                                         fc="0.8", ec="none",
+                                         fc="0.3", ec="none",
                                          patchB=Ellipse((2, -1), 0.5, 0.5),
                                          connectionstyle="angle3,angleA=0,angleB=-90"),
         )
@@ -364,17 +364,16 @@ class Stock(object):
     # Compute today's future scores based on historical scores and today's
     # opening score.
     #
-    def compute_future_scores(self, hist, opening_score):
+    def compute_future_scores(self, hist, opening_score, rel):
         future = []
-        prev_hist_score = hist.itervalues().next()
-        prev_score = opening_score
-
+        hist_opening_scores = hist.itervalues().next()
+        
         for dt, score in hist.iteritems():
-            delta_score = [a - b for (a, b) in zip(score, prev_hist_score)]
-            future_score = np.mean(delta_score) + prev_score
+            future_score = opening_score
+            delta_score = [a - b for (a, b) in zip(score, hist_opening_scores) if rel(a, b)]
+            if delta_score:
+                future_score += np.mean(delta_score)
             future.append((dt, future_score))
-            prev_hist_score = score
-            prev_score = future_score
 
         return future
     
@@ -399,7 +398,6 @@ class Stock(object):
         print "Reference time:", ref_datetime
 
         last_quote_dt = datetime.datetime.fromtimestamp(0);
-        last_score = 0.0
         opening_score = 0.0
         
         #
@@ -415,10 +413,9 @@ class Stock(object):
             if not scores:
                 continue;
 
-            last_score = scores[-1]
-            opening_score = scores[0]
             # Keep the mapping for later reference.
             quotes_2_scores = OrderedDict(zip(quotes, scores))
+            opening_score = scores[0]
 
             # Update historical
             for quote, score in quotes_2_scores.iteritems():
@@ -452,11 +449,13 @@ class Stock(object):
             # Adjust gradient for next page's quotes
             gradient -= (1.0 / float(num_days - 1));
 
-        # Compute future scores based on historical data
-        future_scores = self.compute_future_scores(historical, opening_score)
+        # Compute future scores (upper bounds and lower bounds, based on historical data
+        future_scores_ub = self.compute_future_scores(historical, opening_score, operator.ge)
+        future_scores_lb = self.compute_future_scores(historical, opening_score, operator.le)
 
         # Plot future scores
-        plot.plot_future(future_scores)
+        plot.plot_future(future_scores_ub)
+        plot.plot_future(future_scores_lb)        
 
         #
         # Print out prediction before showing the chart
@@ -473,8 +472,8 @@ class Stock(object):
         #
         # Annotate the min/max points
         #
-        (x1, y1) = max(future_scores, key=operator.itemgetter(1))
-        (x2, y2) = min(future_scores, key=operator.itemgetter(1))
+        (x1, y1) = max(future_scores_ub, key=operator.itemgetter(1))
+        (x2, y2) = min(future_scores_lb, key=operator.itemgetter(1))
         plot.annotate(x1, y1)
         plot.annotate(x2, y2)
         
