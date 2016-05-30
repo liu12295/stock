@@ -141,11 +141,10 @@ class Plot(object):
         plt.show()
         return
 
-    def annotate(self, x, y):
+    def annotate(self, x, y, xytext):
         self.ax.annotate('%.3f' % y, xy=(x, y), xycoords='data',
                          bbox=dict(boxstyle="round4", fc="w", alpha=0.75),
-                         xytext=(-80, -60), textcoords='offset points',
-                         size=15,
+                         xytext=xytext, textcoords='offset points', size=14,
                          arrowprops=dict(arrowstyle="fancy",
                                          fc="0.3", ec="none",
                                          patchB=Ellipse((2, -1), 0.5, 0.5),
@@ -364,15 +363,26 @@ class Stock(object):
     # Compute today's future scores based on historical scores and today's
     # opening score.
     #
-    def compute_future_scores(self, hist, opening_score, rel):
+    def compute_future_scores(self, hist, today_opening_score, rel):
         future = []
         hist_opening_scores = hist.itervalues().next()
-        
+        future_score = today_opening_score
+
+        def geomean(nums):
+            return reduce(lambda x, y: x*y, nums)**(1.0/len(nums))
+    
         for dt, score in hist.iteritems():
-            future_score = opening_score
-            delta_score = [a - b for (a, b) in zip(score, hist_opening_scores) if rel(a, b)]
-            if delta_score:
-                future_score += np.mean(delta_score)
+            if today_opening_score < 1.0:
+                # No need to compute ratio again if chart type is knn
+                delta_score = [a - b for (a, b) in zip(score, hist_opening_scores) if rel(a, b)]
+                if delta_score:
+                    future_score = today_opening_score + np.mean(delta_score)
+            else:
+                # Use ratio wrt hist_opening
+                ratio = [a / b  for (a, b) in zip(score, hist_opening_scores) if rel(a, b)]
+                if ratio:
+                    future_score = today_opening_score * geomean(ratio)
+                    
             future.append((dt, future_score))
 
         return future
@@ -474,8 +484,8 @@ class Stock(object):
         #
         (x1, y1) = max(future_scores_ub, key=operator.itemgetter(1))
         (x2, y2) = min(future_scores_lb, key=operator.itemgetter(1))
-        plot.annotate(x1, y1)
-        plot.annotate(x2, y2)
+        plot.annotate(x1, y1, (-80, 60))
+        plot.annotate(x2, y2, (-80, -60))
         
         # Flush whatever we have, and draw it!
         plot.show()
