@@ -360,8 +360,8 @@ class Stock(object):
         return ref_datetime
 
     #
-    # Compute today's future scores based on historical scores and today's
-    # opening score.
+    # Compute today's future scores based on historical scores, volume, and
+    # today's opening score.
     #
     def compute_future_scores(self, hist, today_opening_score, rel):
         future = []
@@ -371,17 +371,20 @@ class Stock(object):
         def geomean(nums):
             return reduce(lambda x, y: x*y, nums)**(1.0/len(nums))
     
-        for dt, score in hist.iteritems():
+        for dt, scores_and_volume in hist.iteritems():
+            # An effective_record is a tuple of (hist_score, volume, hist_opening_score)
+            effective_records = [(a[0], float(a[1]), b[0]) for (a, b) in \
+                                 zip(scores_and_volume, hist_opening_scores) if rel(a[0], b[0])]
+            total_volume = sum([rec[1] for rec in effective_records])
+            
             if today_opening_score < 1.0:
                 # No need to compute ratio again if chart type is knn
-                delta_score = [a - b for (a, b) in zip(score, hist_opening_scores) if rel(a, b)]
-                if delta_score:
-                    future_score = today_opening_score + np.mean(delta_score)
+                delta_score = sum(([(rec[0] - rec[2]) * (rec[1] / total_volume) for rec in effective_records]))
+                future_score = today_opening_score + delta_score
             else:
                 # Use ratio wrt hist_opening
-                ratio = [a / b  for (a, b) in zip(score, hist_opening_scores) if rel(a, b)]
-                if ratio:
-                    future_score = today_opening_score * geomean(ratio)
+                ratio = sum(([(rec[0] / rec[2]) * (rec[1] / total_volume) for rec in effective_records]))
+                future_score = today_opening_score * ratio
                     
             future.append((dt, future_score))
 
@@ -432,7 +435,7 @@ class Stock(object):
                 _norm_dt = quote.get_normalized_dt()
                 if not historical.has_key(_norm_dt):
                     historical[_norm_dt] = []
-                historical[_norm_dt].append(score)
+                historical[_norm_dt].append((score, quote.v))
 
             # Make sure quotes are listed in ascending order
             assert(last_quote_dt < quotes[0].dt)
@@ -446,6 +449,9 @@ class Stock(object):
                 mfc = "red"
                 marker = 'D'
             else:
+                # Skip the detail if we plot too much data.
+                if num_days > 15:
+                    continue
                 mfc = str(gradient)
                 marker = random.choice(plot.markers)
 
@@ -460,8 +466,8 @@ class Stock(object):
             gradient -= (1.0 / float(num_days - 1));
 
         # Compute future scores (upper bounds and lower bounds, based on historical data
-        future_scores_ub = self.compute_future_scores(historical, opening_score, operator.ge)
         future_scores_lb = self.compute_future_scores(historical, opening_score, operator.le)
+        future_scores_ub = self.compute_future_scores(historical, opening_score, operator.ge)
 
         # Plot future scores
         plot.plot_future(future_scores_ub)
