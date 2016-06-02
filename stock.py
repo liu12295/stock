@@ -122,7 +122,7 @@ class Plot(object):
 
         self.fig.autofmt_xdate()
 
-        #self.plt.legend(loc='best', shadow=True)
+        plt.legend(loc='best', shadow=True)
         plt.tick_params(axis='y', which='both', labelleft='on', labelright='on')
         
         return
@@ -249,6 +249,8 @@ class Stock(object):
             elif (ref_ratio < 0.04) and (ratio < 0.04):
                 # in [-, -0.04] range
                 self.knn_candidate_set.add(quotes[0].dt);
+            else:
+                self.knn_candidate_set.add(quotes[0].dt);
 
             prev_close_price = quotes[-1].c
             
@@ -264,7 +266,7 @@ class Stock(object):
     # Given a sequence of quotes, retun a list of
     # scores depending on ChartType.
     #
-    def compute_scores(self, quotes, chart_type):
+    def compute_display_scores(self, quotes, chart_type):
         # Use close price as score
         if chart_type == 'close':
             return [q.c for q in quotes]
@@ -311,6 +313,9 @@ class Stock(object):
             local_hr += 24
             local_day -= 1
         return (local_day, local_hr, now.minute, now.second)
+
+    def get_num_days_ago(self, quote):
+        return (datetime.datetime.now() - quote.dt).days
 
     def is_market_closed(self):
         (local_day, local_hr, local_min, local_sec) = self.get_local_time()
@@ -422,7 +427,7 @@ class Stock(object):
         historical = OrderedDict()
 
         for page_num, quotes in self.book.iteritems():
-            scores = self.compute_scores(quotes, chart_type)
+            scores = self.compute_display_scores(quotes, chart_type)
             if not scores:
                 continue;
 
@@ -449,11 +454,12 @@ class Stock(object):
                 mfc = "red"
                 marker = 'D'
             else:
-                # Skip the detail if we plot too much data.
-                if num_days > 15:
-                    continue
                 mfc = str(gradient)
                 marker = random.choice(plot.markers)
+
+            # Only show details for the past 7 days
+            if self.get_num_days_ago(quotes[0]) > 7:
+                continue
 
             plot.plot_scores(norm_dates, scores, mfc, marker, quotes[0])
 
@@ -465,13 +471,14 @@ class Stock(object):
             # Adjust gradient for next page's quotes
             gradient -= (1.0 / float(num_days - 1));
 
+
         # Compute future scores (upper bounds and lower bounds, based on historical data
         future_scores_lb = self.compute_future_scores(historical, opening_score, operator.le)
         future_scores_ub = self.compute_future_scores(historical, opening_score, operator.ge)
 
         # Plot future scores
         plot.plot_future(future_scores_ub)
-        plot.plot_future(future_scores_lb)        
+        plot.plot_future(future_scores_lb)
 
         #
         # Print out prediction before showing the chart
