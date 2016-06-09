@@ -407,6 +407,8 @@ class Stock(object):
                 print "No candidate for KNN plot"
                 return
 
+        begin_time = time.time()
+        
         plot = Plot(chart_type);
 
         num_days = len(self.book)
@@ -485,6 +487,9 @@ class Stock(object):
         #
         latest_quote = self.get_latest_quote();
         print self.symbol, "now @", latest_quote.c
+
+        end_time = time.time()
+        print 'Process time: %0.3f ms' % ((end_time-begin_time)*1000.0)
         
         # format the ticks and labels
         plot.format_ticks()
